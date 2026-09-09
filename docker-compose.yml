@@ -1,44 +1,56 @@
-version: '3.8'
-
 services:
-  postgres:
+  fleetpulse-db:
     image: postgres:16-alpine
     container_name: fleetpulse-db
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: fleetpulse_db
-      POSTGRES_USER: fleet_admin
-      POSTGRES_PASSWORD: fleet_secure_password_2026
+      POSTGRES_DB: fleetpulse
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
-      - fleet-net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U fleet_admin -d fleetpulse_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      - fleetpulse-net
 
-  redis:
+  fleetpulse-redis:
     image: redis:7-alpine
     container_name: fleetpulse-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redisdata:/data
     networks:
-      - fleet-net
-    healthcheck:
-      test: ["CMD", "redis-ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      - fleetpulse-net
+
+  fleetpulse-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fleetpulse-api
+    restart: unless-stopped
+    depends_on:
+      - fleetpulse-db
+      - fleetpulse-redis
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://fleetpulse-db:5432/fleetpulse
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_DATA_REDIS_HOST: fleetpulse-redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    networks:
+      - fleetpulse-net
 
 volumes:
   pgdata:
   redisdata:
 
 networks:
-  fleet-net:
+  fleetpulse-net:
     driver: bridge
