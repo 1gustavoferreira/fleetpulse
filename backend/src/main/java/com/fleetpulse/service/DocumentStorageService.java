@@ -14,6 +14,11 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.UUID;
 
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
+import java.net.MalformedURLException;
+import java.util.List;
+
 @Service
 @RequiredArgsConstructor
 public class DocumentStorageService {
@@ -52,5 +57,28 @@ public class DocumentStorageService {
                 .build();
 
         return tripDocumentRepository.save(document);
+    }
+
+    public List<TripDocument> findDocumentsByTripId(Long tripId) {
+        return tripDocumentRepository.findByTripId(tripId);
+    }
+
+    public TripDocument getDocumentMetadata(Long documentId) {
+        return tripDocumentRepository.findById(documentId)
+                .orElseThrow(() -> new IllegalArgumentException("Documento não encontrado com o ID: " + documentId));
+    }
+
+    public Resource loadDocumentAsResource(String storedFilename) {
+        try {
+            Path filePath = Paths.get(storageDir).resolve(storedFilename).normalize();
+            Resource resource = new UrlResource(filePath.toUri());
+            if (resource.exists() && resource.isReadable()) {
+                return resource;
+            } else {
+                throw new RuntimeException("Arquivo não encontrado no disco ou ilegível: " + storedFilename);
+            }
+        } catch (MalformedURLException ex) {
+            throw new RuntimeException("Caminho de arquivo inválido", ex);
+        }
     }
 }
