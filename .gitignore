@@ -1,0 +1,33 @@
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# Compilação Java / Maven / Gradle
+target/
+build/
+.gradle/
+
+# Variáveis de ambiente e dados locais
+.env
+*.log
+
+# Docker data (caso criado fora dos volumes padrão)
+pgdata/
+redisdata/
+
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### Uploads locais do cofre fiscal ###
+uploads/
+storage/
+
+### Arquivos de IDE e SO ###
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
