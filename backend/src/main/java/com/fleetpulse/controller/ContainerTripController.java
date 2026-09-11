@@ -1,4 +1,4 @@
-﻿package com.fleetpulse.controller;
+package com.fleetpulse.controller;
 
 import com.fleetpulse.domain.ContainerTrip;
 import com.fleetpulse.domain.TripTelemetryCache;
@@ -42,6 +42,16 @@ public class ContainerTripController {
     @Operation(summary = "Listar todas as viagens registradas")
     public ResponseEntity<List<ContainerTrip>> getAllTrips() {
         return ResponseEntity.ok(tripRepository.findAll());
+    }
+
+    @GetMapping("/driver/{driverId}/active")
+    @Operation(summary = "Listar viagens ativas atribuídas ao motorista (SCHEDULED ou IN_TRANSIT)")
+    public ResponseEntity<List<ContainerTrip>> getActiveTripsForDriver(@PathVariable Long driverId) {
+        List<ContainerTrip> activeTrips = tripRepository.findByDriverIdAndTripStatusIn(
+                driverId,
+                List.of("SCHEDULED", "IN_TRANSIT")
+        );
+        return ResponseEntity.ok(activeTrips);
     }
 
     @PostMapping
