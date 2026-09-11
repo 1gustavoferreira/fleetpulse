@@ -1,12 +1,19 @@
-package com.fleetpulse.controller;
+﻿package com.fleetpulse.controller;
 
 import com.fleetpulse.domain.ContainerTrip;
 import com.fleetpulse.domain.TripTelemetryCache;
+import com.fleetpulse.dto.TripSummaryResponse;
 import com.fleetpulse.dto.TripTelemetryRequest;
+import com.fleetpulse.entity.TripTelemetryHistory;
 import com.fleetpulse.repository.ContainerTripRepository;
+import com.fleetpulse.repository.TripTelemetryHistoryRepository;
 import com.fleetpulse.repository.redis.TripTelemetryRedisRepository;
+import com.fleetpulse.util.GeoUtils;
 import com.fleetpulse.validation.Iso6346Validator;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -15,10 +22,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/trips")
@@ -28,6 +36,7 @@ public class ContainerTripController {
 
     private final ContainerTripRepository tripRepository;
     private final TripTelemetryRedisRepository telemetryRedisRepository;
+    private final TripTelemetryHistoryRepository telemetryHistoryRepository;
 
     @GetMapping
     @Operation(summary = "Listar todas as viagens registradas")
@@ -37,67 +46,54 @@ public class ContainerTripController {
 
     @PostMapping
     @Operation(summary = "Criar nova ordem de transporte de contêiner")
-    public ResponseEntity<?> createTrip(@Valid @RequestBody CreateTripRequest request) {
-        String container = request.containerNumber() != null ? request.containerNumber().toUpperCase().trim() : "";
-
-        if (!Iso6346Validator.isValid(container)) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-                Map.of(
-                    "status", 400,
-                    "error", "Bad Request",
-                    "message", "O código do contêiner informado (" + container + ") é inválido conforme a norma ISO 6346."
-                )
-            );
+    public ResponseEntity<ContainerTrip> createTrip(@Valid @RequestBody CreateTripRequest request) {
+        if (!Iso6346Validator.isValid(request.containerNumber())) {
+            return ResponseEntity.badRequest().build();
         }
 
         ContainerTrip trip = ContainerTrip.builder()
-                .containerNumber(container)
-                .sealNumber(request.sealNumber().trim())
-                .containerType(request.containerType().toUpperCase().trim())
+                .containerNumber(request.containerNumber())
+                .sealNumber(request.sealNumber())
+                .containerType(request.containerType())
                 .grossWeightKg(request.grossWeightKg())
                 .originLocation(request.originLocation())
                 .destinationLocation(request.destinationLocation())
-                .truckId(request.truckId())
-                .driverId(request.driverId())
+                .truckId(request.truckId() != null ? request.truckId() : 1L)
+                .driverId(request.driverId() != null ? request.driverId() : 1L)
                 .tripStatus("SCHEDULED")
                 .build();
 
-        return ResponseEntity.ok(tripRepository.save(trip));
+        return ResponseEntity.status(HttpStatus.CREATED).body(tripRepository.save(trip));
     }
 
     @PatchMapping("/{id}/start")
     @Operation(summary = "Iniciar viagem (Caminhão em trânsito)")
-    public ResponseEntity<?> startTrip(@PathVariable Long id) {
+    public ResponseEntity<ContainerTrip> startTrip(@PathVariable Long id) {
         return tripRepository.findById(id).map(trip -> {
-            if (!"SCHEDULED".equals(trip.getTripStatus())) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-                    Map.of("message", "Apenas viagens com status SCHEDULED podem ser iniciadas.")
-                );
-            }
             trip.setTripStatus("IN_TRANSIT");
             trip.setStartedAt(OffsetDateTime.now());
-            return ResponseEntity.ok((Object) tripRepository.save(trip));
+            return ResponseEntity.ok(tripRepository.save(trip));
         }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PatchMapping("/{id}/complete")
     @Operation(summary = "Finalizar viagem (Entrega concluída no destino)")
-    public ResponseEntity<?> completeTrip(@PathVariable Long id) {
+    public ResponseEntity<ContainerTrip> completeTrip(@PathVariable Long id) {
         return tripRepository.findById(id).map(trip -> {
-            if (!"IN_TRANSIT".equals(trip.getTripStatus())) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-                    Map.of("message", "Apenas viagens em trânsito (IN_TRANSIT) podem ser finalizadas.")
-                );
+            if (!"IN_TRANSIT".equalsIgnoreCase(trip.getTripStatus())) {
+                return ResponseEntity.badRequest().<ContainerTrip>build();
             }
+
             trip.setTripStatus("DELIVERED");
             trip.setFinishedAt(OffsetDateTime.now());
-            return ResponseEntity.ok((Object) tripRepository.save(trip));
+            telemetryRedisRepository.deleteById(id);
+            return ResponseEntity.ok(tripRepository.save(trip));
         }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PostMapping("/{id}/telemetry")
-    @Operation(summary = "Registrar check-in de GPS da carga em tempo real no cache Redis")
-    public ResponseEntity<?> recordTelemetry(@PathVariable Long id, @Valid @RequestBody TripTelemetryRequest request) {
+    @Operation(summary = "Registrar check-in de GPS da carga em tempo real no cache Redis e histórico PostgreSQL")
+    public ResponseEntity<TripTelemetryCache> recordTelemetry(@PathVariable Long id, @Valid @RequestBody TripTelemetryRequest request) {
         return tripRepository.findById(id).map(trip -> {
             Instant recordedAt = (request.timestamp() != null) ? request.timestamp() : Instant.now();
 
@@ -108,18 +104,110 @@ public class ContainerTripController {
                     .speedKmH(request.speedKmH())
                     .recordedAt(recordedAt)
                     .build();
-
             telemetryRedisRepository.save(cache);
+
+            TripTelemetryHistory history = TripTelemetryHistory.builder()
+                    .tripId(id)
+                    .latitude(request.latitude())
+                    .longitude(request.longitude())
+                    .speedKmH(request.speedKmH())
+                    .recordedAt(recordedAt)
+                    .build();
+            telemetryHistoryRepository.save(history);
+
             return ResponseEntity.ok(cache);
         }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/{id}/telemetry/latest")
     @Operation(summary = "Obter a última localização conhecida do contêiner a partir do cache Redis")
-    public ResponseEntity<?> getLatestTelemetry(@PathVariable Long id) {
+    public ResponseEntity<TripTelemetryCache> getLatestTelemetry(@PathVariable Long id) {
         return telemetryRedisRepository.findById(id)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/{id}/telemetry/history")
+    @Operation(summary = "Obter o histórico completo de rastreamento auditável no PostgreSQL")
+    public ResponseEntity<List<TripTelemetryHistory>> getTripHistory(@PathVariable Long id) {
+        return ResponseEntity.ok(telemetryHistoryRepository.findByTripIdOrderByRecordedAtAsc(id));
+    }
+
+    @GetMapping("/{id}/summary")
+    @Operation(summary = "Obter relatório consolidado da viagem com métricas de trajeto via Haversine",
+               responses = {
+                   @ApiResponse(responseCode = "200", description = "Resumo consolidado com sucesso",
+                                content = @Content(schema = @Schema(implementation = TripSummaryResponse.class))),
+                   @ApiResponse(responseCode = "404", description = "Viagem não encontrada")
+               })
+    public ResponseEntity<TripSummaryResponse> getTripSummary(@PathVariable Long id) {
+        return tripRepository.findById(id).map(trip -> {
+            List<TripTelemetryHistory> history = telemetryHistoryRepository.findByTripIdOrderByRecordedAtAsc(id);
+
+            if (history.isEmpty()) {
+                return ResponseEntity.ok(new TripSummaryResponse(
+                        trip.getId(),
+                        trip.getContainerNumber(),
+                        trip.getTripStatus(),
+                        trip.getStartedAt(),
+                        trip.getFinishedAt(),
+                        0L,
+                        0,
+                        BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                        BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                        BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                ));
+            }
+
+            double totalDistance = 0.0;
+            double totalSpeed = 0.0;
+            double maxSpeed = 0.0;
+
+            for (int i = 0; i < history.size(); i++) {
+                TripTelemetryHistory current = history.get(i);
+
+                if (current.getSpeedKmH() != null) {
+                    double speed = current.getSpeedKmH().doubleValue();
+                    totalSpeed += speed;
+                    if (speed > maxSpeed) {
+                        maxSpeed = speed;
+                    }
+                }
+
+                if (i > 0) {
+                    TripTelemetryHistory previous = history.get(i - 1);
+                    totalDistance += GeoUtils.haversineDistanceKm(
+                            previous.getLatitude(),
+                            previous.getLongitude(),
+                            current.getLatitude(),
+                            current.getLongitude()
+                    );
+                }
+            }
+
+            double avgSpeed = totalSpeed / history.size();
+
+            Long durationMinutes = 0L;
+            if (trip.getStartedAt() != null) {
+                OffsetDateTime endTime = trip.getFinishedAt() != null ? trip.getFinishedAt() : OffsetDateTime.now();
+                durationMinutes = Duration.between(trip.getStartedAt(), endTime).toMinutes();
+            }
+
+            TripSummaryResponse response = new TripSummaryResponse(
+                    trip.getId(),
+                    trip.getContainerNumber(),
+                    trip.getTripStatus(),
+                    trip.getStartedAt(),
+                    trip.getFinishedAt(),
+                    durationMinutes,
+                    history.size(),
+                    BigDecimal.valueOf(totalDistance).setScale(2, RoundingMode.HALF_UP),
+                    BigDecimal.valueOf(avgSpeed).setScale(2, RoundingMode.HALF_UP),
+                    BigDecimal.valueOf(maxSpeed).setScale(2, RoundingMode.HALF_UP)
+            );
+
+            return ResponseEntity.ok(response);
+        }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     public record CreateTripRequest(

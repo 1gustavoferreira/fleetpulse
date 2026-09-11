@@ -5,40 +5,40 @@ spring:
   application:
     name: fleetpulse-api
 
-  # Conexão com o PostgreSQL do Docker
+  # ConexÃ£o com o PostgreSQL do Docker
   datasource:
-    url: jdbc:postgresql://localhost:5432/fleetpulse_db
-    username: fleet_admin
-    password: fleet_secure_password_2026
+    url: jdbc:postgresql://localhost:5432/fleetpulse
+    username: postgres
+    password: postgres
     driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
-      ddl-auto: validate # DDL controlado 100% pelo Flyway para padrão corporativo
+      ddl-auto: validate # DDL controlado 100% pelo Flyway para padrÃ£o corporativo
     show-sql: false
     properties:
       hibernate:
         format_sql: true
 
-  # Migrações Flyway
+  # MigraÃ§Ãµes Flyway
   flyway:
     enabled: true
     baseline-on-migrate: true
     locations: classpath:db/migration
 
-  # Redis para Cache e Estado dos Veículos
+  # Redis para Cache e Estado dos VeÃ­culos
   data:
     redis:
       host: localhost
       port: 6379
 
-  # Upload de Documentos Fiscais (PDFs de até 15MB)
+  # Upload de Documentos Fiscais (PDFs de atÃ© 15MB)
   servlet:
     multipart:
       max-file-size: 15MB
       max-request-size: 15MB
 
-# Configurações de Segurança e Storage
+# ConfiguraÃ§Ãµes de SeguranÃ§a e Storage
 fleetpulse:
   security:
     jwt:
