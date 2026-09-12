@@ -1,9 +1,10 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8081/api/v1';
-
-export const api = axios.create({
-  baseURL: API_BASE_URL,
+const api = axios.create({
+  baseURL: 'http://localhost:8081/api/v1',
+  headers: {
+    'Content-Type': 'application/json',
+  },
 });
 
 api.interceptors.request.use((config) => {
@@ -19,29 +20,26 @@ export const tripService = {
     const res = await api.post('/auth/login', { email, password });
     return res.data;
   },
-
-  getActiveTrips: async (driverId: number) => {
+  getActiveTrips: async (driverId: number = 1) => {
     const res = await api.get(`/trips/driver/${driverId}/active`);
     return res.data;
   },
-
+  createTrip: async (tripData: any) => {
+    const res = await api.post('/trips', tripData);
+    return res.data;
+  },
   startTrip: async (tripId: number) => {
     const res = await api.patch(`/trips/${tripId}/start`);
     return res.data;
   },
-
   completeTrip: async (tripId: number) => {
     const res = await api.patch(`/trips/${tripId}/complete`);
     return res.data;
   },
-
-  sendTelemetry: async (tripId: number, payload: { latitude: number; longitude: number; speedKmH: number }) => {
-    const res = await api.post(`/trips/${tripId}/telemetry`, payload);
-    return res.data;
-  },
-
   getSummary: async (tripId: number) => {
     const res = await api.get(`/trips/${tripId}/summary`);
     return res.data;
   }
 };
+
+export default api;
