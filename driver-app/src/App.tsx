@@ -1,266 +1,378 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Navigation, CheckCircle2, Play, ShieldCheck, MapPin, Coffee, Upload, FileCheck, LayoutDashboard, Smartphone, ExternalLink } from 'lucide-react';
+import { Truck, ShieldCheck, RefreshCw, LayoutDashboard, LogIn, LogOut, User, Navigation, ArrowRight, CheckCircle2, Play, AlertCircle, MapPin, Box } from 'lucide-react';
 import { tripService } from './services/api';
 import { DispatchBoard } from './components/DispatchBoard';
-import type { ContainerTrip, TripSummary } from './types/trip';
 
-export default function App() {
+export function App() {
+  const [authenticatedUser, setAuthenticatedUser] = useState<{ id: number; name: string; email: string; role: string } | null>(() => {
+    const saved = localStorage.getItem('fleetpulse_driver_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
   const [activeTab, setActiveTab] = useState<'driver' | 'dispatch'>('driver');
-  const [token, setToken] = useState<string | null>(localStorage.getItem('fleetpulse_token'));
-  const [activeTrip, setActiveTrip] = useState<ContainerTrip | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [summary, setSummary] = useState<TripSummary | null>(null);
-  const [isResting, setIsResting] = useState(false);
-  const [proofUploaded, setProofUploaded] = useState(false);
+  const [email, setEmail] = useState('carlos@fleetpulse.com');
+  const [password, setPassword] = useState('123456');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
-  const handleLogin = async () => {
-    setLoading(true);
-    try {
-      const data = await tripService.login('admin@fleetpulse.com', 'admin123');
-      const receivedToken = data.token || data;
-      localStorage.setItem('fleetpulse_token', receivedToken);
-      setToken(receivedToken);
-      loadDriverTrip();
-    } catch (err) {
-      alert('Erro ao conectar na API FleetPulse (8081).');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [driverTrips, setDriverTrips] = useState<any[]>([]);
+  const [selectedTripId, setSelectedTripId] = useState<number | null>(null);
+  const [loadingTrip, setLoadingTrip] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const loadDriverTrip = async () => {
+  const isAdmin = authenticatedUser?.role === 'ROLE_ADMIN';
+
+  const fetchDriverTrips = async (driverId: number) => {
+    setLoadingTrip(true);
     try {
-      const trips = await tripService.getActiveTrips(1);
-      if (trips && trips.length > 0) {
-        setActiveTrip(trips[0]);
+      const trips = await tripService.getActiveTrips(driverId);
+      const activeList = (trips || []).filter((t: any) => t.tripStatus !== 'DELIVERED');
+      setDriverTrips(activeList);
+      if (activeList.length > 0) {
+        setSelectedTripId(prev => (activeList.some((t: any) => t.id === prev) ? prev : activeList[0].id));
       } else {
-        setActiveTrip(null);
+        setSelectedTripId(null);
       }
     } catch (err) {
       console.error(err);
+      setDriverTrips([]);
+      setSelectedTripId(null);
+    } finally {
+      setLoadingTrip(false);
     }
   };
 
   useEffect(() => {
-    if (token) loadDriverTrip();
-  }, [token]);
+    if (authenticatedUser) {
+      if (authenticatedUser.role === 'ROLE_ADMIN') {
+        setActiveTab('dispatch');
+      } else {
+        setActiveTab('driver');
+        fetchDriverTrips(authenticatedUser.id);
+      }
+    }
+  }, [authenticatedUser]);
 
-  const handleStartTrip = async () => {
-    if (!activeTrip) return;
+  const handleLogin = async (loginEmail?: string, loginPass?: string) => {
+    const targetEmail = (loginEmail || email).trim().toLowerCase();
+    const targetPass = (loginPass || password).trim();
+    setLoginLoading(true);
+    setLoginError(null);
+
     try {
-      const updated = await tripService.startTrip(activeTrip.id);
-      setActiveTrip(updated);
-    } catch (err) {
-      alert('Falha ao iniciar viagem');
+      const res = await tripService.login(targetEmail, targetPass);
+      const token = res.token || res;
+      localStorage.setItem('fleetpulse_token', token);
+
+      let driverId = 1;
+      let driverName = res.name || 'Carlos Eduardo Silva';
+      let userRole = res.role || 'ROLE_DRIVER';
+
+      if (targetEmail.includes('admin')) {
+        driverId = 0;
+        userRole = 'ROLE_ADMIN';
+      } else if (targetEmail.includes('marcos')) {
+        driverId = 2;
+        driverName = 'Marcos Silveira';
+      } else if (targetEmail.includes('roberto')) {
+        driverId = 3;
+        driverName = 'Roberto Santana';
+      }
+
+      const userData = { id: driverId, name: driverName, email: targetEmail, role: userRole };
+      localStorage.setItem('fleetpulse_driver_user', JSON.stringify(userData));
+      setAuthenticatedUser(userData);
+    } catch (err: any) {
+      setLoginError('Credenciais inválidas. Verifique os dados informados.');
+    } finally {
+      setLoginLoading(false);
     }
   };
 
-  const handleCompleteTrip = async () => {
-    if (!activeTrip) return;
+  const handleLogout = () => {
+    localStorage.removeItem('fleetpulse_driver_user');
+    setAuthenticatedUser(null);
+    setDriverTrips([]);
+    setSelectedTripId(null);
+  };
+
+  const handleStartTrip = async (tripId: number) => {
+    setActionLoading(true);
     try {
-      const updated = await tripService.completeTrip(activeTrip.id);
-      const summaryData = await tripService.getSummary(activeTrip.id);
-      setSummary(summaryData);
-      setActiveTrip(updated);
-    } catch (err) {
-      alert('Falha ao finalizar viagem');
+      await tripService.startTrip(tripId);
+      if (authenticatedUser) fetchDriverTrips(authenticatedUser.id);
+    } catch (err: any) {
+      alert('Erro ao iniciar viagem: ' + (err?.response?.data?.message || err.message));
+    } finally {
+      setActionLoading(false);
     }
   };
 
-  const openNavigation = () => {
-    if (!activeTrip) return;
-    const destEncoded = encodeURIComponent(activeTrip.destinationLocation);
-    window.open(`https://www.google.com/maps/dir/?api=1&destination=${destEncoded}`, '_blank');
+  const handleCompleteTrip = async (tripId: number) => {
+    setActionLoading(true);
+    try {
+      await tripService.completeTrip(tripId);
+      if (authenticatedUser) fetchDriverTrips(authenticatedUser.id);
+    } catch (err: any) {
+      alert('Erro ao finalizar entrega: ' + (err?.response?.data?.message || err.message));
+    } finally {
+      setActionLoading(false);
+    }
   };
+
+  const currentTrip = driverTrips.find(t => t.id === selectedTripId) || driverTrips[0];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center p-3 sm:p-5">
-      {/* Barra de Navegação Corporativa */}
-      <header className="w-full max-w-5xl flex items-center justify-between py-3 border-b border-slate-800">
-        <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-center text-emerald-400 font-black">
-            FP
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start p-3 sm:p-6 font-sans selection:bg-emerald-500 selection:text-slate-950">
+      {/* Top Navbar */}
+      <header className="w-full max-w-4xl flex items-center justify-between py-3 px-4 mb-6 bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-center text-emerald-400">
+            <Truck size={20} />
           </div>
           <div>
-            <h1 className="text-base font-bold text-white leading-none">FleetPulse</h1>
-            <p className="text-xs text-slate-400 mt-0.5">Gestão de Fretes e Motoristas</p>
+            <span className="text-sm font-black tracking-tight text-white flex items-center gap-1.5">
+              FleetPulse
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                DRIVE
+              </span>
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center bg-slate-900 border border-slate-800 p-1 rounded-xl gap-1">
-          <button
-            onClick={() => setActiveTab('driver')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-              activeTab === 'driver' ? 'bg-emerald-500 text-slate-950 shadow-md font-bold' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Smartphone size={14} />
-            Motorista
-          </button>
-          <button
-            onClick={() => setActiveTab('dispatch')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-              activeTab === 'dispatch' ? 'bg-blue-600 text-white shadow-md font-bold' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <LayoutDashboard size={14} />
-            Mesa de Despacho
-          </button>
-        </div>
+        {authenticatedUser && (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-xs font-semibold text-slate-200">{authenticatedUser.name.split(' ')[0]}</span>
+              <button
+                onClick={handleLogout}
+                className="text-slate-500 hover:text-rose-400 pl-1.5 ml-1.5 border-l border-slate-800 transition"
+                title="Sair"
+              >
+                <LogOut size={13} />
+              </button>
+            </div>
+
+            {isAdmin && (
+              <button
+                onClick={() => setActiveTab('dispatch')}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500 text-slate-950 flex items-center gap-1.5"
+              >
+                <LayoutDashboard size={14} />
+                Despacho
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
-      {/* Conteúdo Principal */}
-      <main className="w-full max-w-5xl mt-6 flex-1 flex flex-col items-center">
-        {activeTab === 'dispatch' ? (
-          <DispatchBoard onTripCreated={loadDriverTrip} activeTrip={activeTrip} />
-        ) : (
-          <div className="w-full max-w-md flex flex-col space-y-4">
-            {!token ? (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-xl my-auto">
-                <div className="w-14 h-14 mx-auto bg-slate-800 rounded-2xl flex items-center justify-center text-emerald-400 mb-4">
-                  <Truck size={28} />
-                </div>
-                <h2 className="text-lg font-bold text-white mb-1">Acesso do Motorista</h2>
-                <p className="text-xs text-slate-400 mb-5">Conecte-se para visualizar a ordem de carregamento atribuída.</p>
+      {/* Main Container */}
+      <main className="w-full max-w-4xl flex flex-col items-center">
+        {!authenticatedUser ? (
+          /* Login Card */
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-800/80 rounded-3xl p-6 shadow-2xl space-y-6">
+            <div className="text-center space-y-1">
+              <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-400 mx-auto mb-3">
+                <LogIn size={22} />
+              </div>
+              <h2 className="text-lg font-bold text-white">Terminal do Motorista</h2>
+              <p className="text-xs text-slate-400">Identifique-se para acessar suas ordens</p>
+            </div>
+
+            {loginError && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs text-center">
+                {loginError}
+              </div>
+            )}
+
+            <form onSubmit={(e) => { e.preventDefault(); handleLogin(); }} className="space-y-3">
+              <input
+                type="email"
+                placeholder="E-mail"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-emerald-500 outline-none"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Senha"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-emerald-500 outline-none"
+                required
+              />
+              <button
+                type="submit"
+                disabled={loginLoading}
+                className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 transition font-bold text-slate-950 text-xs rounded-xl shadow-lg shadow-emerald-500/20"
+              >
+                {loginLoading ? 'Conectando...' : 'Acessar Terminal'}
+              </button>
+            </form>
+
+            <div className="border-t border-slate-800/80 pt-4 space-y-2">
+              <button
+                onClick={() => { setEmail('admin@fleetpulse.com'); setPassword('admin123'); handleLogin('admin@fleetpulse.com', 'admin123'); }}
+                className="w-full p-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-300 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5"
+              >
+                <LayoutDashboard size={14} />
+                Central de Despacho (Admin)
+              </button>
+              <div className="grid grid-cols-3 gap-2">
                 <button
-                  onClick={handleLogin}
-                  disabled={loading}
-                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 transition text-slate-950 font-bold rounded-xl text-sm shadow-lg shadow-emerald-500/20"
+                  onClick={() => { setEmail('carlos@fleetpulse.com'); setPassword('123456'); handleLogin('carlos@fleetpulse.com', '123456'); }}
+                  className="py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-300 transition"
                 >
-                  {loading ? 'Conectando...' : 'Entrar no Terminal'}
+                  Carlos
+                </button>
+                <button
+                  onClick={() => { setEmail('marcos@fleetpulse.com'); setPassword('123456'); handleLogin('marcos@fleetpulse.com', '123456'); }}
+                  className="py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-300 transition"
+                >
+                  Marcos
+                </button>
+                <button
+                  onClick={() => { setEmail('roberto@fleetpulse.com'); setPassword('123456'); handleLogin('roberto@fleetpulse.com', '123456'); }}
+                  className="py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-300 transition"
+                >
+                  Roberto
                 </button>
               </div>
-            ) : activeTrip ? (
+            </div>
+          </div>
+        ) : isAdmin ? (
+          <DispatchBoard onTripCreated={() => {}} activeTrip={null} />
+        ) : (
+          /* Driver Dashboard */
+          <div className="w-full max-w-xl space-y-5">
+            {loadingTrip ? (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-500 space-y-2">
+                <RefreshCw size={24} className="animate-spin text-emerald-400" />
+                <span className="text-xs">Sincronizando com a central...</span>
+              </div>
+            ) : driverTrips.length === 0 ? (
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center space-y-3">
+                <ShieldCheck size={44} className="mx-auto text-emerald-400/80" />
+                <h3 className="text-base font-bold text-white">Sem Cargas Pendentes</h3>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+                  Você concluiu todos os transportes atribuídos. Permaneça em prontidão no pátio aguardando novo despacho.
+                </p>
+              </div>
+            ) : (
               <div className="space-y-4">
-                {/* Identificação do Motorista & Cavalo */}
-                <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] text-slate-500 uppercase font-semibold block">Motorista Escalado</span>
-                    <p className="text-sm font-bold text-white">Carlos Eduardo</p>
+                {/* Carrossel de Cargas Atribuídas */}
+                {driverTrips.length > 1 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                        Fila de Transporte ({driverTrips.length})
+                      </span>
+                    </div>
+                    <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none">
+                      {driverTrips.map((t) => {
+                        const isSelected = t.id === currentTrip.id;
+                        const inTransit = t.tripStatus === 'IN_TRANSIT';
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => setSelectedTripId(t.id)}
+                            className={`flex flex-col text-left p-3 rounded-2xl border transition shrink-0 w-44 ${
+                              isSelected
+                                ? 'bg-slate-900 border-emerald-500/60 shadow-lg shadow-emerald-500/10'
+                                : 'bg-slate-900/40 border-slate-800/80 hover:border-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between w-full mb-1">
+                              <span className="text-[10px] font-mono text-slate-400">#{t.id}</span>
+                              <span className={`w-2 h-2 rounded-full ${inTransit ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></span>
+                            </div>
+                            <span className="text-xs font-mono font-bold text-white truncate">{t.containerNumber}</span>
+                            <span className="text-[10px] text-slate-400 truncate mt-0.5">{t.destinationLocation}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <span className="text-[11px] text-slate-500 uppercase font-semibold block">Caminhão</span>
-                    <p className="text-sm font-mono font-bold text-emerald-400">ABC-1D23</p>
-                  </div>
-                </div>
+                )}
 
-                {/* Card da Carga / Ordem */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono text-slate-400">ORDEM #{activeTrip.id}</span>
-                    <span className={`text-xs px-2.5 py-1 rounded-full font-bold uppercase ${
-                      activeTrip.tripStatus === 'IN_TRANSIT'
-                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                        : activeTrip.tripStatus === 'DELIVERED'
-                        ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
-                        : 'bg-slate-800 text-slate-300'
+                {/* Card Detalhado da Carga Ativa */}
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-6">
+                  {/* Status Banner */}
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+                    <div>
+                      <span className="text-[10px] uppercase font-mono text-slate-500 tracking-wider block">Manifesto de Transporte</span>
+                      <h2 className="text-xl font-bold text-white font-mono">Ordem #{currentTrip.id}</h2>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                      currentTrip.tripStatus === 'IN_TRANSIT'
+                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse'
+                        : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
                     }`}>
-                      {activeTrip.tripStatus === 'IN_TRANSIT' ? 'Em Viagem' : activeTrip.tripStatus === 'DELIVERED' ? 'Entregue' : 'Aguardando Início'}
+                      {currentTrip.tripStatus === 'IN_TRANSIT' ? 'Na Estrada' : 'Liberado para Partida'}
                     </span>
                   </div>
 
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <span className="text-[10px] text-slate-500 uppercase font-semibold block">Contêiner</span>
-                        <p className="text-base font-mono font-bold text-white">{activeTrip.containerNumber}</p>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-[10px] text-slate-500 uppercase font-semibold block">Lacre Fiscal</span>
-                        <p className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1 justify-end">
-                          <ShieldCheck size={14} />
-                          {activeTrip.sealNumber}
-                        </p>
+                  {/* Informações da Carga */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800/80 space-y-1">
+                      <span className="text-[10px] uppercase text-slate-500 font-semibold block">Contêiner ISO</span>
+                      <span className="text-sm font-mono font-bold text-emerald-400 block truncate">{currentTrip.containerNumber}</span>
+                      <span className="text-[11px] text-slate-400 font-mono">Lacre: {currentTrip.sealNumber}</span>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800/80 space-y-1">
+                      <span className="text-[10px] uppercase text-slate-500 font-semibold block">Especificação</span>
+                      <span className="text-sm font-bold text-white block">40ft HC Standard</span>
+                      <span className="text-[11px] text-slate-400 font-mono">{currentTrip.grossWeightKg || 27500} kg PBT</span>
+                    </div>
+                  </div>
+
+                  {/* Rota */}
+                  <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 mt-1 shrink-0"></div>
+                      <div className="overflow-hidden">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 block">Origem</span>
+                        <p className="text-xs text-slate-200 truncate">{currentTrip.originLocation}</p>
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-slate-800 text-xs space-y-1.5">
-                      <div className="flex items-center gap-2 text-slate-300">
-                        <MapPin size={14} className="text-emerald-400 shrink-0" />
-                        <span className="truncate">{activeTrip.originLocation}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-slate-300">
-                        <Navigation size={14} className="text-blue-400 shrink-0" />
-                        <span className="truncate">{activeTrip.destinationLocation}</span>
+                    <div className="border-l-2 border-dashed border-slate-800 ml-1 h-3"></div>
+
+                    <div className="flex items-start gap-3">
+                      <div className="w-2.5 h-2.5 rounded-full bg-blue-400 mt-1 shrink-0"></div>
+                      <div className="overflow-hidden">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 block">Destino</span>
+                        <p className="text-xs text-slate-200 truncate">{currentTrip.destinationLocation}</p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Ações da Ordem */}
-                  {activeTrip.tripStatus === 'SCHEDULED' && (
-                    <button
-                      onClick={handleStartTrip}
-                      className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 transition font-bold text-slate-950 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 text-sm"
-                    >
-                      <Play size={16} fill="currentColor" />
-                      Iniciar Viagem
-                    </button>
-                  )}
-
-                  {activeTrip.tripStatus === 'IN_TRANSIT' && (
-                    <div className="space-y-3 pt-1">
-                      {/* Abrir Rota Real */}
+                  {/* Botão de Ação */}
+                  <div className="pt-2">
+                    {currentTrip.tripStatus === 'SCHEDULED' ? (
                       <button
-                        onClick={openNavigation}
-                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 active:scale-95 transition font-bold text-white rounded-xl flex items-center justify-center gap-2 text-xs"
+                        onClick={() => handleStartTrip(currentTrip.id)}
+                        disabled={actionLoading}
+                        className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition font-black text-slate-950 text-sm rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20"
                       >
-                        <ExternalLink size={15} />
-                        Traçar Rota no Google Maps / GPS
+                        <Play size={18} fill="currentColor" />
+                        {actionLoading ? 'Gravando Início...' : 'Iniciar Viagem'}
                       </button>
-
+                    ) : (
                       <button
-                        onClick={() => setIsResting(!isResting)}
-                        className={`w-full py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition ${
-                          isResting ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                        }`}
+                        onClick={() => handleCompleteTrip(currentTrip.id)}
+                        disabled={actionLoading}
+                        className="w-full py-4 bg-blue-500 hover:bg-blue-600 active:scale-[0.98] transition font-black text-white text-sm rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-blue-500/20"
                       >
-                        <Coffee size={14} />
-                        {isResting ? 'Retomar Condução' : 'Registrar Pausa de Descanso (Posto)'}
+                        <CheckCircle2 size={18} />
+                        {actionLoading ? 'Finalizando...' : 'Confirmar Entrega & Baixar'}
                       </button>
-
-                      {/* Finalização com Anexo */}
-                      <div className="pt-2 border-t border-slate-800 space-y-2">
-                        <label className="border border-dashed border-slate-700 hover:border-slate-600 p-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer text-xs text-slate-400 transition">
-                          <input type="file" accept="image/*" className="hidden" onChange={() => setProofUploaded(true)} />
-                          {proofUploaded ? (
-                            <span className="text-emerald-400 flex items-center gap-1 font-semibold">
-                              <FileCheck size={16} /> Canhoto Anexado com Sucesso
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-1">
-                              <Upload size={16} /> Foto do Canhoto Assinado
-                            </span>
-                          )}
-                        </label>
-
-                        <button
-                          onClick={handleCompleteTrip}
-                          className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 transition font-bold text-slate-950 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 text-xs"
-                        >
-                          <CheckCircle2 size={16} />
-                          Confirmar Entrega no Destino
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
-
-                {/* Resumo Auditado da Entrega */}
-                {summary && (
-                  <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-4 shadow-xl space-y-2">
-                    <div className="flex items-center gap-2 text-emerald-400">
-                      <CheckCircle2 size={18} />
-                      <h3 className="font-bold text-xs">Viagem Finalizada e Registrada!</h3>
-                    </div>
-                    <p className="text-[11px] text-slate-400">Canhoto arquivado e frete liberado para faturamento.</p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center shadow-xl my-auto">
-                <CheckCircle2 size={36} className="mx-auto text-emerald-400 mb-2" />
-                <h2 className="text-base font-bold text-white mb-1">Sem Frete no Momento</h2>
-                <p className="text-xs text-slate-400">Aguardando nova ordem de carga da central de despacho.</p>
               </div>
             )}
           </div>
@@ -269,3 +381,5 @@ export default function App() {
     </div>
   );
 }
+
+export default App;

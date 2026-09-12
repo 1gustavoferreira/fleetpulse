@@ -25,10 +25,28 @@ public class AuthController {
     @PostMapping("/login")
     @Operation(summary = "Autenticar usuário e gerar token JWT")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
-        var user = userRepository.findByEmail(request.email())
+        String email = request.email().trim().toLowerCase();
+        String password = request.password().trim();
+
+        // Autenticação dos motoristas de teste
+        if ("carlos@fleetpulse.com".equals(email) && "123456".equals(password)) {
+            String token = jwtService.generateToken(email, "ROLE_DRIVER");
+            return ResponseEntity.ok(new LoginResponse(token, "Bearer", "Carlos Eduardo Silva", "ROLE_DRIVER"));
+        }
+        if ("marcos@fleetpulse.com".equals(email) && "123456".equals(password)) {
+            String token = jwtService.generateToken(email, "ROLE_DRIVER");
+            return ResponseEntity.ok(new LoginResponse(token, "Bearer", "Marcos Silveira", "ROLE_DRIVER"));
+        }
+        if ("roberto@fleetpulse.com".equals(email) && "123456".equals(password)) {
+            String token = jwtService.generateToken(email, "ROLE_DRIVER");
+            return ResponseEntity.ok(new LoginResponse(token, "Bearer", "Roberto Santana", "ROLE_DRIVER"));
+        }
+
+        // Validação via banco de dados (ex: admin@fleetpulse.com)
+        var user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Credenciais inválidas"));
 
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        if (!passwordEncoder.matches(password, user.getPasswordHash())) {
             throw new RuntimeException("Credenciais inválidas");
         }
 

@@ -31,7 +31,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/trips")
 @RequiredArgsConstructor
-@Tag(name = "OperaÃ§Ãµes de ContÃªineres", description = "GestÃ£o de viagens, lacres e rotas portuÃ¡rias")
+@Tag(name = "OperaÃƒÂ§ÃƒÂµes de ContÃƒÂªineres", description = "GestÃƒÂ£o de viagens, lacres e rotas portuÃƒÂ¡rias")
 public class ContainerTripController {
 
     private final ContainerTripRepository tripRepository;
@@ -45,7 +45,7 @@ public class ContainerTripController {
     }
 
     @GetMapping("/driver/{driverId}/active")
-    @Operation(summary = "Listar viagens ativas atribuÃ­das ao motorista (SCHEDULED ou IN_TRANSIT)")
+    @Operation(summary = "Listar viagens ativas atribuÃƒÂ­das ao motorista (SCHEDULED ou IN_TRANSIT)")
     public ResponseEntity<List<ContainerTrip>> getActiveTripsForDriver(@PathVariable Long driverId) {
         List<ContainerTrip> activeTrips = tripRepository.findByDriverIdAndTripStatusIn(
                 driverId,
@@ -55,7 +55,7 @@ public class ContainerTripController {
     }
 
     @PostMapping
-    @Operation(summary = "Criar nova ordem de transporte de contÃªiner")
+    @Operation(summary = "Criar nova ordem de transporte de contÃƒÂªiner")
     public ResponseEntity<ContainerTrip> createTrip(@Valid @RequestBody CreateTripRequest request) {
         if (!Iso6346Validator.isValid(request.containerNumber())) {
             return ResponseEntity.badRequest().build();
@@ -77,7 +77,7 @@ public class ContainerTripController {
     }
 
     @PatchMapping("/{id}/start")
-    @Operation(summary = "Iniciar viagem (CaminhÃ£o em trÃ¢nsito)")
+    @Operation(summary = "Iniciar viagem (CaminhÃƒÂ£o em trÃƒÂ¢nsito)")
     public ResponseEntity<ContainerTrip> startTrip(@PathVariable Long id) {
         return tripRepository.findById(id).map(trip -> {
             trip.setTripStatus("IN_TRANSIT");
@@ -87,7 +87,7 @@ public class ContainerTripController {
     }
 
     @PatchMapping("/{id}/complete")
-    @Operation(summary = "Finalizar viagem (Entrega concluÃ­da no destino)")
+    @Operation(summary = "Finalizar viagem (Entrega concluÃƒÂ­da no destino)")
     public ResponseEntity<ContainerTrip> completeTrip(@PathVariable Long id) {
         return tripRepository.findById(id).map(trip -> {
             if (!"IN_TRANSIT".equalsIgnoreCase(trip.getTripStatus())) {
@@ -102,7 +102,7 @@ public class ContainerTripController {
     }
 
     @PostMapping("/{id}/telemetry")
-    @Operation(summary = "Registrar check-in de GPS da carga em tempo real no cache Redis e histÃ³rico PostgreSQL")
+    @Operation(summary = "Registrar check-in de GPS da carga em tempo real no cache Redis e histÃƒÂ³rico PostgreSQL")
     public ResponseEntity<TripTelemetryCache> recordTelemetry(@PathVariable Long id, @Valid @RequestBody TripTelemetryRequest request) {
         return tripRepository.findById(id).map(trip -> {
             Instant recordedAt = (request.timestamp() != null) ? request.timestamp() : Instant.now();
@@ -130,7 +130,7 @@ public class ContainerTripController {
     }
 
     @GetMapping("/{id}/telemetry/latest")
-    @Operation(summary = "Obter a Ãºltima localizaÃ§Ã£o conhecida do contÃªiner a partir do cache Redis")
+    @Operation(summary = "Obter a ÃƒÂºltima localizaÃƒÂ§ÃƒÂ£o conhecida do contÃƒÂªiner a partir do cache Redis")
     public ResponseEntity<TripTelemetryCache> getLatestTelemetry(@PathVariable Long id) {
         return telemetryRedisRepository.findById(id)
                 .map(ResponseEntity::ok)
@@ -138,17 +138,17 @@ public class ContainerTripController {
     }
 
     @GetMapping("/{id}/telemetry/history")
-    @Operation(summary = "Obter o histÃ³rico completo de rastreamento auditÃ¡vel no PostgreSQL")
+    @Operation(summary = "Obter o histÃƒÂ³rico completo de rastreamento auditÃƒÂ¡vel no PostgreSQL")
     public ResponseEntity<List<TripTelemetryHistory>> getTripHistory(@PathVariable Long id) {
         return ResponseEntity.ok(telemetryHistoryRepository.findByTripIdOrderByRecordedAtAsc(id));
     }
 
     @GetMapping("/{id}/summary")
-    @Operation(summary = "Obter relatÃ³rio consolidado da viagem com mÃ©tricas de trajeto via Haversine",
+    @Operation(summary = "Obter relatÃƒÂ³rio consolidado da viagem com mÃƒÂ©tricas de trajeto via Haversine",
                responses = {
                    @ApiResponse(responseCode = "200", description = "Resumo consolidado com sucesso",
                                 content = @Content(schema = @Schema(implementation = TripSummaryResponse.class))),
-                   @ApiResponse(responseCode = "404", description = "Viagem nÃ£o encontrada")
+                   @ApiResponse(responseCode = "404", description = "Viagem nÃƒÂ£o encontrada")
                })
     public ResponseEntity<TripSummaryResponse> getTripSummary(@PathVariable Long id) {
         return tripRepository.findById(id).map(trip -> {
@@ -238,5 +238,43 @@ public class ContainerTripController {
                 .sorted((a, b) -> Long.compare(b.getId(), a.getId()))
                 .toList();
         return org.springframework.http.ResponseEntity.ok(list);
+    }
+
+    @PutMapping("/{id}")
+    public org.springframework.http.ResponseEntity<com.fleetpulse.domain.ContainerTrip> updateTrip(
+            @PathVariable Long id,
+            @RequestBody com.fleetpulse.dto.CreateTripRequest request) {
+        com.fleetpulse.domain.ContainerTrip trip = tripRepository.findById(id)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "Trip not found"));
+
+        if (!"SCHEDULED".equalsIgnoreCase(String.valueOf(trip.getTripStatus()))) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Somente viagens aguardando início podem ser alteradas");
+        }
+
+        if (!com.fleetpulse.validation.Iso6346Validator.isValid(request.containerNumber())) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Contêiner ISO 6346 inválido");
+        }
+
+        trip.setContainerNumber(request.containerNumber());
+        trip.setSealNumber(request.sealNumber());
+        trip.setOriginLocation(request.originLocation());
+        trip.setDestinationLocation(request.destinationLocation());
+        if (request.driverId() != null) trip.setDriverId(request.driverId());
+        if (request.truckId() != null) trip.setTruckId(request.truckId());
+
+        return org.springframework.http.ResponseEntity.ok(tripRepository.save(trip));
+    }
+
+    @DeleteMapping("/{id}")
+    public org.springframework.http.ResponseEntity<Void> deleteTrip(@PathVariable Long id) {
+        com.fleetpulse.domain.ContainerTrip trip = tripRepository.findById(id)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "Trip not found"));
+
+        if ("IN_TRANSIT".equalsIgnoreCase(String.valueOf(trip.getTripStatus()))) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Cargas em trânsito não podem ser excluídas diretamente");
+        }
+
+        tripRepository.delete(trip);
+        return org.springframework.http.ResponseEntity.noContent().build();
     }
 }

@@ -24,8 +24,20 @@ export const tripService = {
     const res = await api.get(`/trips/driver/${driverId}/active`);
     return res.data;
   },
+  getCompletedTrips: async () => {
+    const res = await api.get('/trips/history');
+    return res.data;
+  },
   createTrip: async (tripData: any) => {
     const res = await api.post('/trips', tripData);
+    return res.data;
+  },
+  updateTrip: async (id: number, tripData: any) => {
+    const res = await api.put(`/trips/${id}`, tripData);
+    return res.data;
+  },
+  deleteTrip: async (id: number) => {
+    const res = await api.delete(`/trips/${id}`);
     return res.data;
   },
   startTrip: async (tripId: number) => {
