@@ -41,6 +41,8 @@ public class SecurityConfig {
                     "/swagger-ui.html"
                 ).permitAll()
                 .requestMatchers("/api/v1/auth/**").permitAll()
+                .requestMatchers("/api/v1/trips/**").permitAll()
+                .requestMatchers("/api/v1/documents/**").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
@@ -69,7 +71,7 @@ public class SecurityConfig {
                 .info(new Info()
                         .title("FleetPulse Core API")
                         .version("1.0")
-                        .description("Gestao de Transporte de Conteineres, Cofre Fiscal e Telemetria"))
+                        .description("Gestão de Transporte de Contêineres, Cofre Fiscal e Telemetria"))
                 .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
                 .components(new Components().addSecuritySchemes(securitySchemeName,
                         new SecurityScheme()
